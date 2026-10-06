@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Control Ejecutivo · Limpieza y Saneamiento</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#eef1f7;--card:#fff;--text:#0f1b33;--mut:#64748b;--line:#e2e8f0;--c1:#1f3864;--c2:#2a9d8f;--c3:#f4a261;--c4:#e63946;--c5:#2e9e5b;--c6:#5b9bd5;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a1120;--card:#121c32;--text:#e8eefc;--mut:#8da2c4;--line:#22304d;--c1:#6ea8ff}}
+:root[data-theme="dark"]{--bg:#0a1120;--card:#121c32;--text:#e8eefc;--mut:#8da2c4;--line:#22304d;--c1:#6ea8ff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 Arial,Helvetica,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 22px;background:linear-gradient(120deg,#13264d,#1f4e79 60%,#2a9d8f);color:#fff}
+h1{margin:0;font-size:20px;letter-spacing:.3px}header small{opacity:.85;display:block;margin-top:2px}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+select,button{font:inherit;padding:7px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;cursor:pointer}
+select option{color:#000}button.p{background:#fff;color:#13264d;font-weight:700;border:0}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:rgba(0,0,0,.25);padding:6px 10px;border-radius:99px}
+.dot{width:9px;height:9px;border-radius:50%;background:#2e9e5b;box-shadow:0 0 0 0 #2e9e5b;animation:p 1.6s infinite}.dot.off{background:#f4a261;animation:none}
+@keyframes p{70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+main{padding:16px 22px 28px;display:grid;grid-template-columns:repeat(12,1fr);gap:14px;max-width:1700px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px 10px;box-shadow:0 2px 10px rgba(15,27,51,.06);grid-column:span 4;min-width:0}
+.card.s3{grid-column:span 3}.card.s6{grid-column:span 6}.card.s8{grid-column:span 8}
+.card h3{margin:0;font-size:13px;letter-spacing:.2px}.card p{margin:2px 0 6px;font-size:11px;color:var(--mut)}
+.cv{position:relative;height:230px}.s3 .cv{height:170px}
+@media(max-width:1000px){.card,.card.s3,.card.s6,.card.s8{grid-column:span 6}}
+@media(max-width:620px){.card,.card.s3,.card.s6,.card.s8{grid-column:span 12}header{padding:14px}main{padding:12px}}
+#drop{display:none;position:fixed;inset:0;background:rgba(19,38,77,.82);color:#fff;align-items:center;justify-content:center;font-size:22px;z-index:9}
+</style></head><body>
+<header><div><h1>CONTROL EJECUTIVO · LIMPIEZA Y SANEAMIENTO</h1><small id="src">Datos de demostración</small></div>
+<div class="ctl"><span class="live"><i class="dot off" id="dot"></i><span id="st">Demo</span> · <b id="clk"></b></span>
+<select id="fy" title="Año"></select><select id="fa" title="Administrador"></select>
+<button class="p" id="btg">Conectar Google Sheets</button><button id="btn">Excel local</button><input type="file" id="inp" accept=".xlsx,.xls" hidden></div></header>
+<main id="m"></main><div id="drop">Suelte el Excel aquí</div>
+<script>
+const $=s=>document.querySelector(s),D=864e5,MES=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const ST=[['cot','Cotización'],['apr','Respuesta del cliente'],['eje','Ejecución'],['fac','Registro a facturación'],['cmp','Cierre comprometido']];
+const EST=['1. Por cotizar','2. Esperando al cliente','3. Por ejecutar','4. Ejecutado (por registrar)','5. Registrado (por liberar)','6. Listo para facturar','7. Facturado','No aprobado','Anulado'];
+const todayMs=()=>{const n=new Date();return Date.UTC(n.getFullYear(),n.getMonth(),n.getDate())};
+const toMs=v=>{if(v==null||v==='')return null;if(typeof v==='number')return Math.floor(v-25569)*D;const g=String(v).match(/^Date\((\d+),(\d+),(\d+)/);if(g)return Date.UTC(+g[1],+g[2],+g[3]);if(v instanceof Date)return Date.UTC(v.getFullYear(),v.getMonth(),v.getDate());const m=String(v).match(/(\d+)\/(\d+)\/(\d+)/);return m?Date.UTC(+m[3],m[2]-1,+m[1]):null};
+const fmt=n=>'S/ '+Math.round(n).toLocaleString('es-PE'),pc=n=>(n*100).toFixed(1)+'%';
+let S={rows:[],cfg:null,handle:null,last:0},CH={};
+// ---------- configuración y datos demo
+const DEFT={'Limpieza industrial':[3,7,5,2],'Limpieza corporativa':[2,5,3,2],'Desinfección':[1,3,2,2],'Fumigación y control de plagas':[2,5,3,2],'Limpieza de tanques':[3,7,7,2],'Gestión de residuos':[3,10,5,2],'Servicios generales':[2,5,5,2],'Mantenimiento':[3,7,7,2],'Proyectos':[7,15,20,3]};
+const defCfg=()=>({sla:DEFT,def:[2,7,5,2],obj:.3,min:.15,alerta:5,hab:true,hol:new Set([Date.UTC(2026,0,1),Date.UTC(2026,3,2),Date.UTC(2026,3,3),Date.UTC(2026,4,1),Date.UTC(2026,5,29),Date.UTC(2026,6,28),Date.UTC(2026,6,29),Date.UTC(2026,7,30),Date.UTC(2026,9,8),Date.UTC(2026,10,1),Date.UTC(2026,11,8),Date.UTC(2026,11,25)])});
+function demo(){let s=11;const R=()=>(s=s*16807%2147483647)/2147483647,T=[['Limpieza industrial',4500,18000,'Admin 1'],['Fumigación y control de plagas',800,5500,'Admin 1'],['Limpieza de tanques',1500,7000,'Admin 1'],['Gestión de residuos',2500,12000,'Admin 1'],['Limpieza corporativa',1800,9000,'Admin 2'],['Desinfección',900,4500,'Admin 2'],['Fumigación y control de plagas',800,5500,'Admin 2'],['Servicios generales',1200,6000,'Admin 3'],['Mantenimiento',1500,9000,'Admin 3'],['Proyectos',18000,85000,'Admin 3']],
+CL=['Textiles Andinos','Alimentos del Sur','Clínica San Gabriel','Banco Horizonte','Minera Cordillera','Hotel Costa Verde','Colegio Santa Rosa','Logística Callao','Farmacéutica Nova','Corporación Pacífico'],t0=Date.UTC(2026,0,12),td=todayMs(),o=[],a=n=>t0+n*D;
+for(let i=0;i<90;i++){const [tp,lo,hi,ad]=T[Math.floor(R()*T.length)],pr=Math.round((lo+R()*(hi-lo))/50)*50,sol=t0+Math.floor((td-t0)/D*Math.pow(R(),.75))*D,pj=tp==='Proyectos';
+const r={sol,cli:CL[Math.floor(R()*CL.length)],adm:ad,tipo:tp,comp:sol+(9+Math.floor(R()*(pj?35:15)))*D,precio:pr,costo:Math.round(pr*(1-.08-R()*.37)/10)*10};
+const cot=sol+Math.floor(R()*6)*D;if(cot<=td){r.cot=cot;if(R()<.13)r.res='No aprobado';else{const ap=cot+(1+Math.floor(R()*12))*D;if(ap<=td){r.apr=ap;const ej=ap+(pj?8+Math.floor(R()*14):1+Math.floor(R()*9))*D;if(ej<=td){r.eje=ej;const rg=ej+Math.floor(R()*5)*D;if(rg<=td){r.reg=rg;if(R()<.8){r.listo='Sí';if(td-rg>25*D&&R()<.75)r.fact='Sí'}}}}}}o.push(r)}return o}
+// ---------- lectura de Excel
+async function readFile(f){const wb=XLSX.read(await f.arrayBuffer(),{type:'array'}),ws=wb.Sheets['Registro']||wb.Sheets[wb.SheetNames[0]],C=wb.Sheets['Config'],j=w=>XLSX.utils.sheet_to_json(w,{header:1,raw:true,defval:null});ingest(j(ws),C?j(C):null,f.name,f.lastModified)}
+function ingest(A,B,name,mod){const rows=[];
+for(let i=0;i<A.length;i++){const r=A[i];if(!r||r[1]==null||r[1]==='')continue;const o={sol:toMs(r[1]),cli:r[2],adm:r[3],tipo:r[4],comp:toMs(r[6]),cot:toMs(r[7]),apr:toMs(r[8]),eje:toMs(r[9]),reg:toMs(r[10]),res:r[11],listo:r[12],fact:r[13],costo:+r[14]||0,precio:+r[15]||0};if(o.sol)rows.push(o)}
+const cf=defCfg();
+if(B){const p=i=>B[i]&&B[i][1],sla={};
+for(let i=17;i<42;i++){const r=B[i];if(r&&r[0])sla[r[0]]=[2,3,4,5].map((k,j)=>+r[k]||cf.def[j])}
+cf.sla=Object.keys(sla).length?sla:cf.sla;cf.def=[5,6,7,8].map((k,j)=>+p(k)||cf.def[j]);cf.obj=+p(9)||cf.obj;cf.min=+p(10)||cf.min;cf.alerta=+p(11)||cf.alerta;cf.hab=p(4)!=='Calendario';
+const h=new Set();for(let i=17;i<47;i++){const v=B[i]&&toMs(B[i][21]);if(v)h.add(v)}cf.hol=h}
+S.rows=rows;S.cfg=cf;S.last=mod;$('#src').textContent=`${name} · ${rows.length} servicios · leído ${new Date().toLocaleTimeString('es-PE')}`;
+try{localStorage.setItem('ctl_rows',JSON.stringify({rows,name}))}catch(e){}render()}
+// ---------- cálculo
+function dd(a,b){if(b<a)return 0;const c=S.cfg;if(!c.hab)return(b-a)/D;let n=0;for(let t=a;t<=b;t+=D){const w=new Date(t).getUTCDay();if(w&&w<6&&!c.hol.has(t))n++}return Math.max(0,n-1)}
+function enrich(r){const c=S.cfg,td=todayMs(),cl=r.res==='No aprobado'||r.res==='Anulado',sl=c.sla[r.tipo]||c.def,d={},s={};
+[['cot',r.sol,r.cot,0],['apr',r.cot,r.apr,1],['eje',r.apr,r.eje,2],['fac',r.eje,r.reg,3]].forEach(([k,a,b,i])=>{if(!a||(!b&&cl))return;const e=dd(a,b||td);d[k]=e;s[k]=b?(e<=sl[i]?'Cumple':'Incumple'):(e<=sl[i]?'En plazo':'Vencido')});
+if(r.comp&&!(!r.eje&&cl))s.cmp=r.eje?(r.eje<=r.comp?'Cumple':'Incumple'):(td<=r.comp?'En plazo':'Vencido');
+const lf=r.listo==='Sí'&&r.fact!=='Sí'&&!cl;
+r.e=r.res==='No aprobado'?EST[7]:r.res==='Anulado'?EST[8]:r.fact==='Sí'?EST[6]:r.listo==='Sí'?EST[5]:r.reg?EST[4]:r.eje?EST[3]:r.apr?EST[2]:r.cot?EST[1]:EST[0];
+return Object.assign(r,{d,s,lf,cl,ven:r.apr?r.precio:0,cos:r.apr?r.costo:0,age:lf&&r.reg?Math.floor((td-r.reg)/D):null})}
+const grp=(a,f)=>a.reduce((m,x)=>{const k=f(x);(m[k]=m[k]||[]).push(x);return m},{}),sum=(a,f)=>a.reduce((t,x)=>t+(f(x)||0),0),mg=(v,c)=>v>0?(v-c)/v:0;
+// ---------- gráficos
+const col=()=>{const s=getComputedStyle(document.documentElement);return k=>s.getPropertyValue('--'+k).trim()};
+function card(id,t,h,cls){$('#m').insertAdjacentHTML('beforeend',`<div class="card ${cls||''}"><h3>${t}</h3><p>${h}</p><div class="cv"><canvas id="${id}"></canvas></div></div>`)}
+const LAY=[['g1','Cumplimiento de SLA','Etapas entregadas a tiempo. Meta ≥ 90 %','s3'],['g2','Margen sobre venta','Rentabilidad de lo aprobado vs objetivo','s3'],['g3','Tasa de aprobación','Cotizaciones aprobadas por el cliente','s3'],['g4','Pipeline de servicios','Dónde está cada servicio hoy','s3'],
+['mes','Venta, costo y margen por mes','Barras: S/ vendido y costo · línea: margen %','s6'],['cnt','Servicios solicitados vs aprobados','Si la barra naranja se separa de la azul, se pierde conversión','s6'],
+['est','Embudo por estado','Barras largas al final = cuello de botella'],['sla','SLA por etapa','Verde cumple · azul en plazo · naranja vencido · rojo incumple'],['dias','Días reales vs SLA','Barra azul sobre la naranja = etapa lenta'],
+['cli','Top 5 clientes','Venta aprobada (S/)'],['adm','Venta y margen por administrador','Barras: venta y costo · línea: margen %'],['tip','Margen % por tipo de servicio','Rojo = bajo el mínimo · ámbar = bajo el objetivo'],
+['age','Listos para facturar: antigüedad','S/ esperando factura según días de espera','s6'],['ven','Etapas vencidas hoy','Servicios abiertos que ya superaron su SLA','s6']];
+function render(){const c=col(),cf=S.cfg,td=todayMs(),all=S.rows.map(enrich),yrs=[...new Set(all.map(r=>new Date(r.sol).getUTCFullYear()))].sort(),ads=[...new Set(all.map(r=>r.adm).filter(Boolean))];
+const fy=$('#fy'),fa=$('#fa'),vy=fy.value||'Todos',va=fa.value||'Todos';
+fy.innerHTML=['Todos',...yrs].map(y=>`<option ${y==vy?'selected':''}>${y}</option>`).join('');fa.innerHTML=['Todos',...ads].map(a=>`<option ${a==va?'selected':''}>${a}</option>`).join('');
+const inY=r=>vy==='Todos'||new Date(r.sol).getUTCFullYear()==vy,Y=all.filter(inY),F=va==='Todos'?Y:Y.filter(r=>r.adm===va),cy=vy==='Todos'?new Date().getFullYear():+vy;
+Chart.defaults.font.family='Arial';Chart.defaults.color=c('mut');Chart.defaults.borderColor=c('line');
+const base=(x={})=>({responsive:true,maintainAspectRatio:false,animation:{duration:500},plugins:{legend:{position:'bottom',labels:{boxWidth:10,usePointStyle:true}}},...x});
+const sc=(o={})=>({x:{grid:{display:false},...o.x},y:{beginAtZero:true,...o.y}});
+const mk=(id,cfg)=>{CH[id]&&CH[id].destroy();CH[id]=new Chart($('#'+id),cfg)};
+// KPIs
+const ap=F.filter(r=>r.apr),cz=F.filter(r=>r.cot),V=sum(ap,r=>r.ven),Co=sum(ap,r=>r.cos),M=mg(V,Co);
+let ok=0,ev=0;F.forEach(r=>ST.forEach(([k])=>{const s=r.s[k];if(s==='Cumple')ok++;if(s==='Cumple'||s==='Incumple'||s==='Vencido')ev++}));const SL=ev?ok/ev:0,AP=cz.length?ap.length/cz.length:0;
+const lv=(v,a,b)=>v>=a?c('c5'):v>=b?c('c3'):c('c4');
+const gauge=(id,v,mx,clr,txt,sub)=>mk(id,{type:'doughnut',data:{datasets:[{data:[Math.min(v/mx,1),1-Math.min(v/mx,1)],backgroundColor:[clr,c('line')],borderWidth:0}]},options:{rotation:-90,circumference:180,cutout:'74%',responsive:true,maintainAspectRatio:false,animation:{duration:700},plugins:{legend:{display:false},tooltip:{enabled:false},ctr:{txt,sub}}}});
+gauge('g1',SL,1,lv(SL,.9,.75),pc(SL),`${ok} de ${ev} etapas`);gauge('g2',M,.6,lv(M,cf.obj,cf.min),pc(M),`Venta ${fmt(V)}`);gauge('g3',AP,1,lv(AP,.7,.5),pc(AP),`${ap.length} de ${cz.length} cotizados`);
+const cn=n=>F.filter(r=>n.includes(r.e)).length;
+mk('g4',{type:'doughnut',data:{labels:['En proceso','Listo para facturar','Facturado','Cerrado sin servicio'],datasets:[{data:[cn(EST.slice(0,5)),cn([EST[5]]),cn([EST[6]]),cn(EST.slice(7))],backgroundColor:[c('c6'),c('c3'),c('c5'),c('c4')],borderWidth:0}]},options:base({cutout:'62%',plugins:{legend:{position:'right',labels:{boxWidth:10,usePointStyle:true,font:{size:11}}}}})});
+// mensual
+const mm=MES.map((_,i)=>F.filter(r=>new Date(r.sol).getUTCFullYear()==cy&&new Date(r.sol).getUTCMonth()==i)),
+mv=mm.map(a=>sum(a,r=>r.ven)),mc=mm.map(a=>sum(a,r=>r.cos));
+mk('mes',{type:'bar',data:{labels:MES,datasets:[{type:'bar',label:'Venta aprobada',data:mv,backgroundColor:c('c1'),borderRadius:4,yAxisID:'y'},{type:'bar',label:'Costo',data:mc,backgroundColor:c('c3'),borderRadius:4,yAxisID:'y'},{type:'line',label:'Margen %',data:mv.map((v,i)=>mg(v,mc[i])*100),borderColor:c('c4'),backgroundColor:c('c4'),tension:.3,yAxisID:'y1'}]},options:base({scales:{x:{grid:{display:false}},y:{beginAtZero:true},y1:{position:'right',min:-10,max:60,grid:{display:false},ticks:{callback:v=>v+'%'}}}})});
+mk('cnt',{type:'bar',data:{labels:MES,datasets:[{label:'Solicitados',data:mm.map(a=>a.length),backgroundColor:c('c1'),borderRadius:4},{label:'Aprobados',data:mm.map(a=>a.filter(r=>r.apr).length),backgroundColor:c('c3'),borderRadius:4}]},options:base({scales:sc({y:{ticks:{precision:0}}})})});
+// estados
+mk('est',{type:'bar',data:{labels:EST,datasets:[{data:EST.map(e=>F.filter(r=>r.e===e).length),backgroundColor:EST.map((e,i)=>i<5?c('c2'):i==5?c('c3'):i==6?c('c5'):c('c4')),borderRadius:4}]},options:base({indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{grid:{display:false},ticks:{font:{size:10}}}}})});
+const cs=k=>ST.map(([s])=>F.filter(r=>r.s[s]===k).length);
+mk('sla',{type:'bar',data:{labels:ST.map(s=>s[1]),datasets:[['Cumple','c5'],['En plazo','c6'],['Vencido','c3'],['Incumple','c4']].map(([k,cc])=>({label:k,data:cs(k),backgroundColor:c(cc)}))},options:base({indexAxis:'y',scales:{x:{stacked:true,beginAtZero:true,ticks:{precision:0}},y:{stacked:true,grid:{display:false},ticks:{font:{size:10}}}}})});
+const av=k=>{const a=F.filter(r=>r.d[k]!=null&&r.s[k]&&r.s[k][0]!=='E'&&r.s[k][0]!=='V').map(r=>r.d[k]);return a.length?a.reduce((x,y)=>x+y)/a.length:0},sv=Object.values(cf.sla),sa=i=>sv.reduce((t,x)=>t+x[i],0)/sv.length;
+mk('dias',{type:'bar',data:{labels:['Cotizar','Aprobación','Ejecutar','Reg. factura'],datasets:[{label:'Real promedio',data:['cot','apr','eje','fac'].map(av),backgroundColor:c('c1'),borderRadius:4},{label:'SLA promedio',data:[0,1,2,3].map(sa),backgroundColor:c('c3'),borderRadius:4}]},options:base({scales:sc({y:{title:{display:true,text:'días'}}})})});
+// clientes
+const tc=Object.entries(grp(ap,r=>r.cli)).map(([k,a])=>[k,sum(a,r=>r.ven)]).sort((a,b)=>b[1]-a[1]).slice(0,5);
+mk('cli',{type:'bar',data:{labels:tc.map(x=>x[0]),datasets:[{data:tc.map(x=>x[1]),backgroundColor:c('c2'),borderRadius:4}]},options:base({indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:t=>fmt(t.raw)}}},scales:{x:{beginAtZero:true,ticks:{callback:v=>v/1000+'k'}},y:{grid:{display:false}}}})});
+const aa=ads.slice(0,6).map(a=>Y.filter(r=>r.adm===a&&r.apr)),av2=aa.map(a=>sum(a,r=>r.ven)),ac=aa.map(a=>sum(a,r=>r.cos));
+mk('adm',{type:'bar',data:{labels:ads.slice(0,6),datasets:[{type:'bar',label:'Venta',data:av2,backgroundColor:c('c1'),borderRadius:4},{type:'bar',label:'Costo',data:ac,backgroundColor:c('c3'),borderRadius:4},{type:'line',label:'Margen %',data:av2.map((v,i)=>mg(v,ac[i])*100),borderColor:c('c4'),backgroundColor:c('c4'),yAxisID:'y1'}]},options:base({scales:{x:{grid:{display:false}},y:{beginAtZero:true},y1:{position:'right',min:-10,max:60,grid:{display:false},ticks:{callback:v=>v+'%'}}}})});
+const tp=Object.entries(grp(ap,r=>r.tipo)).map(([k,a])=>[k,mg(sum(a,r=>r.ven),sum(a,r=>r.cos))]).sort((a,b)=>b[1]-a[1]);
+mk('tip',{type:'bar',data:{labels:tp.map(x=>x[0]),datasets:[{data:tp.map(x=>x[1]*100),backgroundColor:tp.map(x=>lv(x[1],cf.obj,cf.min)),borderRadius:4}]},options:base({indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:t=>t.raw.toFixed(1)+'%'}}},scales:{x:{ticks:{callback:v=>v+'%'}},y:{grid:{display:false},ticks:{font:{size:10}}}}})});
+// facturación
+const L=F.filter(r=>r.lf),bk=[[0,cf.alerta,'0–'+cf.alerta+' d','c5'],[cf.alerta+1,10,(cf.alerta+1)+'–10 d','c3'],[11,15,'11–15 d','c3'],[16,1e9,'> 15 d','c4']];
+mk('age',{type:'bar',data:{labels:bk.map(b=>b[2]),datasets:[{data:bk.map(b=>sum(L.filter(r=>r.age>=b[0]&&r.age<=b[1]),r=>r.precio)),backgroundColor:bk.map(b=>c(b[3])),borderRadius:4}]},options:base({plugins:{legend:{display:false},tooltip:{callbacks:{label:t=>fmt(t.raw)+' · '+L.filter(r=>r.age>=bk[t.dataIndex][0]&&r.age<=bk[t.dataIndex][1]).length+' serv.'}}},scales:sc({y:{ticks:{callback:v=>v/1000+'k'}}})})});
+mk('ven',{type:'bar',data:{labels:ST.map(s=>s[1]),datasets:[{data:cs('Vencido'),backgroundColor:c('c4'),borderRadius:4}]},options:base({plugins:{legend:{display:false}},scales:sc({y:{ticks:{precision:0}}})})})}
+// plugin de valor central para los medidores
+Chart.register({id:'ctr',afterDraw(ch){const o=ch.options.plugins.ctr;if(!o||!o.txt)return;const a=ch.getDatasetMeta(0).data[0],x=ch.ctx,s=getComputedStyle(document.documentElement);x.save();x.textAlign='center';x.fillStyle=s.getPropertyValue('--text');x.font='bold 26px Arial';x.fillText(o.txt,a.x,a.y-18);x.fillStyle=s.getPropertyValue('--mut');x.font='11px Arial';x.fillText(o.sub,a.x,a.y);x.restore()}});
+// ---------- arranque, tiempo real y eventos
+LAY.forEach(l=>card(...l));S.cfg=defCfg();S.rows=demo();
+try{const k=JSON.parse(localStorage.getItem('ctl_rows')||'null');if(k&&k.rows&&k.rows.length){S.rows=k.rows;$('#src').textContent=k.name+' · último archivo cargado (reconecte para actualizar)'}}catch(e){}
+$('#fy').onchange=$('#fa').onchange=render;
+const tick=()=>{$('#clk').textContent=new Date().toLocaleTimeString('es-PE')};tick();setInterval(tick,1000);setInterval(render,60000);
+async function poll(){try{const f=await S.handle.getFile();if(f.lastModified!==S.last)await readFile(f)}catch(e){}}
+async function connect(){if(window.showOpenFilePicker){try{const [h]=await showOpenFilePicker({types:[{accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]});S.handle=h;await readFile(await h.getFile());$('#st').textContent='EN VIVO · sincroniza cada 3 s';$('#dot').classList.remove('off');setInterval(poll,3000);return}catch(e){if(e.name==='AbortError')return}}$('#inp').click()}
+$('#btn').onclick=connect;
+const GS={id:null,t:null};
+async function gsPull(){const q=(s,r)=>fetch(`https://docs.google.com/spreadsheets/d/${GS.id}/gviz/tq?tqx=out:json&headers=0&sheet=${s}&range=${r}`).then(x=>x.text()).then(t=>JSON.parse(t.slice(t.indexOf('{'),t.lastIndexOf('}')+1)).table.rows.map(x=>x.c.map(c=>c&&c.v!=null?c.v:null)));
+const[A,B]=await Promise.all([q('Registro','A1:AK1006'),q('Config','A1:V117').catch(()=>null)]);ingest(A,B,'Google Sheets',Date.now())}
+async function gstart(u,quiet){GS.id=(u.match(/\/d\/([\w-]+)/)||[0,u.trim()])[1];try{await gsPull();try{localStorage.setItem('ctl_gs',u)}catch(e){}clearInterval(GS.t);GS.t=setInterval(()=>gsPull().catch(()=>{}),20000);$('#st').textContent='EN VIVO · Google Sheets cada 20 s';$('#dot').classList.remove('off')}catch(e){if(!quiet)alert('No se pudo leer el Sheet. Debe ser un Google Sheet (no .xlsx) compartido como "Cualquier persona con el enlace: Lector", con las hojas Registro y Config.')}}
+$('#btg').onclick=()=>{let u;try{u=localStorage.getItem('ctl_gs')}catch(e){}u=prompt('Pegue el enlace de su Google Sheet "Control general":',u||'');if(u)gstart(u)};
+try{const g=localStorage.getItem('ctl_gs');if(g)gstart(g,true)}catch(e){}
+$('#inp').onchange=async e=>{if(e.target.files[0]){await readFile(e.target.files[0]);$('#st').textContent='Archivo cargado';$('#dot').classList.remove('off')}};
+['dragover','drop'].forEach(ev=>addEventListener(ev,async e=>{e.preventDefault();$('#drop').style.display=ev==='dragover'?'flex':'none';if(ev==='drop'&&e.dataTransfer.files[0]){await readFile(e.dataTransfer.files[0]);$('#st').textContent='Archivo cargado';$('#dot').classList.remove('off')}}));
+addEventListener('dragleave',()=>$('#drop').style.display='none');
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change',render);
+render();
+</script></body></html>
